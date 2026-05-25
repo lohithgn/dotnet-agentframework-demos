@@ -427,3 +427,10 @@ FodyWeavers.xsd
 *.msix
 *.msm
 *.msp
+
+# azd environment state
+.azure/
+
+# Local environment variables
+.env
+
