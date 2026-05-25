@@ -32,13 +32,13 @@ Every example starts with the same preamble. Copy this block verbatim at the top
 
 ```csharp
 #:sdk Microsoft.NET.Sdk
-#:package Microsoft.Agents.AI@1.0.0
-#:package Microsoft.Agents.AI.OpenAI@1.0.0
-#:package Azure.AI.OpenAI@2.1.0
-#:package Azure.Identity@1.13.0
-#:package OpenAI@2.1.0
-#:package DotNetEnv@3.1.1
-#:package Spectre.Console@0.49.1
+#:package Microsoft.Agents.AI@1.6.2
+#:package Microsoft.Agents.AI.OpenAI@1.6.2
+#:package Azure.AI.OpenAI@2.9.0-beta.1
+#:package Azure.Identity@1.21.0
+#:package OpenAI@2.10.0
+#:package DotNetEnv@3.2.0
+#:package Spectre.Console@0.55.2
 
 using System.ClientModel;
 using Azure.AI.OpenAI;
@@ -51,7 +51,22 @@ using Spectre.Console;
 Env.Load();
 ```
 
-> Versions are placeholders that will be re-pinned to the latest stable + matching previews at the start of Stage 5 (example porting). When that happens, the same versions are duplicated verbatim across every file — do not introduce a "shared versions" file.
+> Versions verified against NuGet on 2026-05-26. Latest stable for `Microsoft.Agents.AI*` (1.6.2), `OpenAI` (2.10.0), `Azure.Identity` (1.21.0), `DotNetEnv` (3.2.0), and `Spectre.Console` (0.55.2). `Azure.AI.OpenAI` uses the latest 2.9.0-beta.1 (no newer stable than 2.1.0 exists yet) to track current Azure OpenAI surface. Workflow examples additionally add `#:package Microsoft.Agents.AI.Workflows@1.6.2`. The same versions are duplicated verbatim across every file — do not introduce a "shared versions" file.
+
+### Extras by feature
+
+Examples that need additional packages:
+
+- **Workflows**: `#:package Microsoft.Agents.AI.Workflows@1.6.2`
+- **Mem0 memory**: `#:package Microsoft.Agents.AI.Mem0@1.0.0-preview.251028.1` (only preview available)
+- **MCP client/server**: `#:package ModelContextProtocol@<latest>` (verify before use)
+- **OTel / Aspire**: `#:package OpenTelemetry.Exporter.OpenTelemetryProtocol@<latest>`
+- **App Insights**: `#:package Azure.Monitor.OpenTelemetry.Exporter@<latest>`
+- **Postgres + pgvector**: `#:package Npgsql@<latest>`, `#:package Pgvector.Npgsql@<latest>`
+- **Redis**: `#:package StackExchange.Redis@<latest>` (no first-party `Microsoft.Agents.AI.Redis` exists on NuGet yet)
+- **Azure AI Search**: SDK route is `#:package Azure.Search.Documents@<latest>` (no first-party `Microsoft.Agents.AI.AzureAISearch` exists on NuGet yet)
+
+`<latest>` placeholders are filled in when the corresponding example is ported.
 
 ## Canonical client-selection block
 
