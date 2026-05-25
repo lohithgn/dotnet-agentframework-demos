@@ -1,0 +1,10 @@
+# Default: let Git auto-detect text vs binary and normalize on commit
+* text=auto
+
+# Shell scripts must keep LF endings even on Windows checkouts
+*.sh text eol=lf
+
+# Windows scripts use CRLF
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
