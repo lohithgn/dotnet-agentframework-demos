@@ -63,10 +63,43 @@ Examples that need additional packages:
 - **OTel / Aspire**: `#:package OpenTelemetry.Exporter.OpenTelemetryProtocol@<latest>`
 - **App Insights**: `#:package Azure.Monitor.OpenTelemetry.Exporter@<latest>`
 - **Postgres + pgvector**: `#:package Npgsql@<latest>`, `#:package Pgvector.Npgsql@<latest>`
-- **Redis**: `#:package StackExchange.Redis@<latest>` (no first-party `Microsoft.Agents.AI.Redis` exists on NuGet yet)
-- **Azure AI Search**: SDK route is `#:package Azure.Search.Documents@<latest>` (no first-party `Microsoft.Agents.AI.AzureAISearch` exists on NuGet yet)
+- **Redis**: `#:package StackExchange.Redis@<latest>` — see "Redis pattern" below.
+- **Azure AI Search**: `#:package Azure.Search.Documents@<latest>` — see "Azure AI Search pattern" below.
 
 `<latest>` placeholders are filled in when the corresponding example is ported.
+
+### Redis pattern (no first-party MAF Redis package)
+
+Python ships `agent_framework.redis.RedisHistoryProvider`. There is **no equivalent** `Microsoft.Agents.AI.Redis` package on NuGet — the only first-party history/memory providers in .NET MAF today are `InMemoryChatHistoryProvider` (in `Microsoft.Agents.AI.Abstractions`), `ChatHistoryMemoryProvider` (in `Microsoft.Agents.AI`, vector-store-backed), and `CosmosChatHistoryProvider` (in `Microsoft.Agents.AI.CosmosNoSql`).
+
+For Redis examples, port the Python sample by writing a custom `ChatHistoryProvider` subclass — the same pattern the repo demonstrates in [`dotnet/samples/02-agents/Agents/Agent_Step04_3rdPartyChatHistoryStorage/Program.cs`](https://github.com/microsoft/agent-framework/tree/main/dotnet/samples/02-agents/Agents/Agent_Step04_3rdPartyChatHistoryStorage/Program.cs). The sample's `VectorChatHistoryProvider` is the canonical template: override `ProvideChatHistoryAsync` and `StoreChatHistoryAsync`, hold a `ProviderSessionState<State>` to round-trip a session DB key through `AgentSession.StateBag`, and back it with `StackExchange.Redis` (`IDatabase.HashSet` / `SortedSetAdd` for ordered messages, or `RediSearch` for vector memory).
+
+For `agent_memory_redis.cs`, prefer `ChatHistoryMemoryProvider` over a `VectorStore` whose backing connector is Redis — but verify the connector exists on NuGet before porting (`Microsoft.SemanticKernel.Connectors.Redis` is the most likely option). If no usable Redis vector connector is published, fall back to a custom provider using RediSearch directly.
+
+### Azure AI Search pattern (no first-party MAF AzureAISearch context provider)
+
+Python ships `agent_framework.azure.AzureAISearchContextProvider` with `mode="semantic"` and `mode="agentic"`. There is **no equivalent** `Microsoft.Agents.AI.AzureAISearch` context provider on NuGet.
+
+The canonical .NET pattern is `TextSearchProvider` (from `Microsoft.Agents.AI`) wired to a `SearchClient`-backed adapter. Reference implementation: [`dotnet/samples/04-hosting/FoundryHostedAgents/responses/Hosted-AzureSearchRag/Program.cs`](https://github.com/microsoft/agent-framework/tree/main/dotnet/samples/04-hosting/FoundryHostedAgents/responses/Hosted-AzureSearchRag/Program.cs). The adapter signature is:
+
+```csharp
+static Func<string, CancellationToken, Task<IEnumerable<TextSearchProvider.TextSearchResult>>>
+    CreateSearchAdapter(SearchClient client, int top = 3) =>
+    async (query, ct) =>
+    {
+        var response = await client.SearchAsync<SearchDocument>(query, new SearchOptions { Size = top }, ct);
+        var results = new List<TextSearchProvider.TextSearchResult>();
+        await foreach (var hit in response.Value.GetResultsAsync().WithCancellation(ct))
+        {
+            results.Add(new TextSearchProvider.TextSearchResult { /* SourceName, SourceLink, Value */ });
+        }
+        return results;
+    };
+```
+
+It then plugs into the agent via `ChatClientAgentOptions.AIContextProviders = [new TextSearchProvider(adapter, options)]`. This covers the **semantic mode** half of the Python provider. There is no out-of-the-box .NET helper for **agentic mode** (KnowledgeBase orchestration) — if the Python example exercises it, document the gap in the ported `.cs` file rather than reimplementing Knowledge Base call planning by hand.
+
+Required extras for these examples: `#:package Azure.Search.Documents@<latest>` plus the standard MAF header.
 
 ## Canonical client-selection block
 
