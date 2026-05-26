@@ -172,6 +172,41 @@ This is a file-based-apps repo — there is no `dotnet restore`. Packages are re
 
 When adding a new package to one example, scan the rest of the repo with `grep_search` to see if other examples should also adopt it.
 
+## Function tools
+
+The canonical shape (from the [Azure OpenAI Agents docs](https://learn.microsoft.com/en-us/agent-framework/agents/providers/azure-openai?pivots=programming-language-csharp#function-tools)) is a `static` method annotated with `[Description]` on both the method and each parameter, wrapped with `AIFunctionFactory.Create(...)` and passed to `AsAIAgent(..., tools: [...])`.
+
+```csharp
+AIAgent agent = chatClient.AsAIAgent(
+    instructions: "...",
+    name: "InfoAgent",
+    tools: [AIFunctionFactory.Create(GetWeather, serializerOptions: ToolJsonOptions)]);
+
+[Description("Returns weather data for a given city.")]
+static WeatherReport GetWeather(
+    [Description("City name, spelled out fully")] string city)
+{
+    AnsiConsole.MarkupLine($"[grey]Getting weather for {Markup.Escape(city)}[/]");
+    return new WeatherReport(60, "Rainy");
+}
+
+static readonly JsonSerializerOptions ToolJsonOptions =
+    new(JsonSerializerDefaults.Web) { TypeInfoResolver = new DefaultJsonTypeInfoResolver() };
+
+record WeatherReport(int Temperature, string Description);
+```
+
+Notes that bite when porting Python tool examples:
+
+- **Always pass `serializerOptions:` with an explicit `TypeInfoResolver = new DefaultJsonTypeInfoResolver()`** when the tool accepts or returns a custom type (`record`, POCO, `Dictionary<,>` of POCOs, etc.). The default `AIFunctionFactory` uses a source-generated `JsonSerializerContext` that only knows BCL primitives, so anything else fails at first call with `JsonTypeInfo metadata for type 'Foo' was not provided`. Plain `new JsonSerializerOptions(JsonSerializerDefaults.Web)` is **not** enough — it throws `JsonSerializerOptions instance must specify a TypeInfoResolver setting before being marked as read-only`.
+- **`DefaultJsonTypeInfoResolver` triggers `IL2026` and `IL3050`** AOT-trimming warnings. File-based examples aren't AOT-compiled, so suppress them at the top of the file with `#:property NoWarn=IL2026;IL3050`.
+- **Use the snake_case Python parameter description verbatim** where reasonable (e.g. `"City name, spelled out fully"`). It makes the cross-repo diff obvious.
+- **Tool logging stays in Spectre.Console** (`AnsiConsole.MarkupLine($"[grey]...[/]")`) rather than `Microsoft.Extensions.Logging`. Matches the Python repo's `rich` log style and avoids pulling in a logger config block.
+- **Record/POCO types declared at the bottom of the file**, below the `static` local functions. Top-level statements must precede type declarations.
+- For tools that return primitives (`string`, `int`, `bool`) the `serializerOptions:` argument can be omitted — the source-gen context handles those.
+
+`agent_tool.cs` is the reference implementation.
+
 ## Debugging Azure .NET SDK HTTP requests
 
 When debugging HTTP interactions between Azure .NET SDKs (like `Azure.AI.OpenAI`, `Azure.AI.Evaluation`) and Azure services, you have a few levers — they are the .NET equivalents of the Python `azure.core` policies.
