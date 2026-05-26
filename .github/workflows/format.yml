@@ -1,0 +1,74 @@
+name: format
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  hygiene:
+    name: whitespace + YAML
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check trailing whitespace
+        run: |
+          if grep -rnP '[ \t]+$' --include='*.cs' --include='*.md' --include='*.yml' --include='*.yaml' --include='*.json' .; then
+            echo "::error::Trailing whitespace found. Run 'sed -i \"s/[[:space:]]*$//\" <file>' or use an editor with .editorconfig support."
+            exit 1
+          fi
+
+      - name: Check final newline
+        run: |
+          fail=0
+          while IFS= read -r -d '' f; do
+            if [ -s "$f" ] && [ "$(tail -c 1 "$f" | wc -l)" -eq 0 ]; then
+              echo "::error file=$f::Missing trailing newline"
+              fail=1
+            fi
+          done < <(find . -type f \( -name '*.cs' -o -name '*.md' -o -name '*.yml' -o -name '*.yaml' -o -name '*.json' \) -not -path './.git/*' -print0)
+          exit $fail
+
+      - name: Validate YAML
+        run: |
+          python3 -c "
+          import sys, glob, yaml
+          fail = False
+          for f in glob.glob('**/*.yml', recursive=True) + glob.glob('**/*.yaml', recursive=True):
+              if '/.git/' in f: continue
+              try:
+                  with open(f) as fh: list(yaml.safe_load_all(fh))
+              except Exception as e:
+                  print(f'::error file={f}::{e}')
+                  fail = True
+          sys.exit(1 if fail else 0)
+          "
+
+  dotnet-format:
+    name: dotnet format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Verify formatting (whitespace)
+        run: |
+          if [ -d examples ]; then
+            dotnet format whitespace --folder examples --verify-no-changes
+          else
+            echo "examples/ not present yet; skipping."
+          fi
+
+      - name: Verify formatting (style)
+        run: |
+          if [ -d examples ]; then
+            dotnet format style --folder examples --verify-no-changes --severity info
+          else
+            echo "examples/ not present yet; skipping."
+          fi
