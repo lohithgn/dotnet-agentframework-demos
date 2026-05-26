@@ -103,40 +103,60 @@ Required extras for these examples: `#:package Azure.Search.Documents@<latest>` 
 
 ## Canonical client-selection block
 
-This block matches the Python repo's `API_HOST` switch. Place it right after `Env.Load()`. The result is an `IChatClient` you hand to `new ChatClientAgent(...)`.
+This block matches the Python repo's `API_HOST` switch. Read `apiHost` at the top of the file right after `Env.Load()`, hand it to `CreateChatClient`, and put the `static` local function at the **bottom** of the file. The result is an `IChatClient` you turn into an agent via `chatClient.AsAIAgent(instructions: ..., name: ...)` (the prescribed pattern from the [Azure OpenAI Agents docs](https://learn.microsoft.com/en-us/agent-framework/agents/providers/azure-openai?pivots=programming-language-csharp)).
+
+Copy this block **byte-identical** into every example — same whitespace, same identifier names, same `static` modifier. Identical blocks are bulk-updatable with a single find/replace when MAF ships a breaking change. Do **not** factor this into a shared file.
 
 ```csharp
+Env.Load();
+
 string apiHost = Environment.GetEnvironmentVariable("API_HOST") ?? "azure";
 
-IChatClient chatClient = apiHost switch
+IChatClient chatClient = CreateChatClient(apiHost);
+
+// ... example-specific code (agent creation, run, etc.) ...
+
+static IChatClient CreateChatClient(string apiHost)
 {
-    "azure" => new AzureOpenAIClient(
-            new Uri(Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")!),
-            new DefaultAzureCredential())
-        .GetChatClient(Environment.GetEnvironmentVariable("AZURE_OPENAI_CHAT_DEPLOYMENT")!)
-        .AsIChatClient(),
+    return apiHost switch
+    {
+        // Note: using AzureCliCredential for local demo runs. For production, prefer
+        // ManagedIdentityCredential. See README for details.
+        "azure" => new AzureOpenAIClient(
+                new Uri(Environment.GetEnvironmentVariable("AZURE_OPENAI_ENDPOINT")!),
+                new AzureCliCredential())
+            .GetChatClient(Environment.GetEnvironmentVariable("AZURE_OPENAI_CHAT_DEPLOYMENT")!)
+            .AsIChatClient(),
 
-    "openai" => new OpenAIClient(Environment.GetEnvironmentVariable("OPENAI_API_KEY")!)
-        .GetChatClient(Environment.GetEnvironmentVariable("OPENAI_MODEL") ?? "gpt-4o-mini")
-        .AsIChatClient(),
+        "openai" => new OpenAIClient(Environment.GetEnvironmentVariable("OPENAI_API_KEY")!)
+            .GetChatClient(Environment.GetEnvironmentVariable("OPENAI_MODEL") ?? "gpt-4o-mini")
+            .AsIChatClient(),
 
-    "ollama" => new OpenAIClient(
-            new ApiKeyCredential(Environment.GetEnvironmentVariable("OLLAMA_API_KEY") ?? "nokeyneeded"),
-            new OpenAIClientOptions { Endpoint = new Uri(Environment.GetEnvironmentVariable("OLLAMA_ENDPOINT")!) })
-        .GetChatClient(Environment.GetEnvironmentVariable("OLLAMA_MODEL")!)
-        .AsIChatClient(),
+        "ollama" => new OpenAIClient(
+                new ApiKeyCredential(Environment.GetEnvironmentVariable("OLLAMA_API_KEY") ?? "nokeyneeded"),
+                new OpenAIClientOptions { Endpoint = new Uri(Environment.GetEnvironmentVariable("OLLAMA_ENDPOINT")!) })
+            .GetChatClient(Environment.GetEnvironmentVariable("OLLAMA_MODEL")!)
+            .AsIChatClient(),
 
-    _ => throw new InvalidOperationException($"Unknown API_HOST: {apiHost}")
-};
+        _ => throw new InvalidOperationException($"Unknown API_HOST: {apiHost}")
+    };
+}
 ```
 
-For examples that use embeddings, the equivalent embedding-client block selects between `AzureOpenAIClient.GetEmbeddingClient(...)`, `OpenAIClient.GetEmbeddingClient(...)`, and the Ollama variant — using `AZURE_OPENAI_EMBEDDING_DEPLOYMENT`, `OPENAI_EMBEDDING_MODEL`, and `OLLAMA_EMBEDDING_MODEL` respectively.
+Why this exact shape:
+
+- **`AzureCliCredential`** (not `DefaultAzureCredential`) because every example is run locally as a demo against your `az login` session. The README documents how to swap to `ManagedIdentityCredential` for production.
+- **`AsAIAgent` extension** (not `new ChatClientAgent(...)`) because that is what the Azure OpenAI Agents docs prescribe.
+- **`apiHost` read at the top, passed as a parameter** so the dependency is visible at the call site and the local function can be `static` (no accidental closure capture).
+- **`static` local function** so it can't accidentally capture outer variables and so future contributors don't grow it into a closure over example state.
+
+For examples that use embeddings, add a parallel `static IEmbeddingGenerator<string, Embedding<float>> CreateEmbeddingClient(string apiHost)` local function next to `CreateChatClient` — selecting between `AzureOpenAIClient.GetEmbeddingClient(...)`, `OpenAIClient.GetEmbeddingClient(...)`, and the Ollama variant using `AZURE_OPENAI_EMBEDDING_DEPLOYMENT`, `OPENAI_EMBEDDING_MODEL`, and `OLLAMA_EMBEDDING_MODEL`. Yes, this duplicates the `AzureOpenAIClient` / `OpenAIClient` construction — that's deliberate. Do not factor out a shared `CreateAzureClient` helper.
 
 ## Conventions
 
 - **Snake_case filenames** for examples (`agent_basic.cs`, `workflow_handoffbuilder_rules.cs`) — matches the Python repo so descriptions and the README table line up 1:1.
 - **PascalCase** for C# types, methods, and properties. Local variables and parameters are camelCase.
-- **`Env.Load()`** is the first executable line. The block above goes immediately after.
+- **`Env.Load()`** is the first executable line. The canonical block above goes immediately after.
 - **No top-level `try/catch`** unless the example is specifically demonstrating error handling. Let exceptions propagate so the stack trace is visible.
 - **`Spectre.Console`** for any colored / styled output (`AnsiConsole.MarkupLine`, `AnsiConsole.Prompt`). It maps cleanly to the Python repo's `rich` usage.
 - **`DefaultAzureCredential`** is the only auth path for Azure resources. No connection strings, no keys.

@@ -28,6 +28,7 @@ Every example is a single-file .NET 10 app (`*.cs`) that you run directly with `
   * [Local environment](#local-environment)
 * [Configuring model providers](#configuring-model-providers)
   * [Using Microsoft Foundry models](#using-microsoft-foundry-models)
+    * [Authentication](#authentication)
   * [Using OpenAI.com models](#using-openaicom-models)
   * [Using local Ollama models](#using-local-ollama-models)
 * [Running the .NET examples](#running-the-net-examples)
@@ -133,6 +134,10 @@ This project includes infrastructure as code (IaC) to provision Azure OpenAI dep
     ```shell
     azd down
     ```
+
+### Authentication
+
+The examples authenticate to Azure OpenAI using `AzureCliCredential` because they are intended to be run as local demos — they pick up the identity from your `az login` (or `azd auth login`) session without any extra setup. For production workloads, switch to `ManagedIdentityCredential` instead so the app authenticates with its assigned managed identity rather than a developer's signed-in CLI session.
 
 ## Using OpenAI.com models
 
