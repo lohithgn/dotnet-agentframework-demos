@@ -93,7 +93,6 @@ c:\g\dotnet-agentframework-demos\
 │  ├─ main.parameters.json
 │  ├─ write_dot_env.ps1
 │  └─ write_dot_env.sh
-├─ global.json                (pins SDK to 10.0.x)
 ├─ examples/                  (file-based apps — each is a single .cs file)
 │  ├─ agent_basic.cs
 │  ├─ agent_tool.cs
@@ -213,12 +212,11 @@ Files to copy as-is:
 
 ---
 
-## Stage 4 — `global.json` + shared snippets (prereq for examples)
+## Stage 4 — shared snippets (prereq for examples)
 
 File-based apps need almost no scaffolding. The only pre-work before porting examples:
 
-1. `global.json` pinning the .NET SDK to `10.0.x` so every contributor uses the same toolchain.
-2. A short reference snippet (kept inside `AGENTS.md`, not as a shared library) that documents the standard `#:package` header and the canonical Azure / OpenAI / Ollama client-selection block. Each example copies this block verbatim — matching how every Python example duplicates the same `load_dotenv` + `API_HOST` switch at the top.
+1. A short reference snippet (kept inside `AGENTS.md`, not as a shared library) that documents the standard `#:package` header and the canonical Azure / OpenAI / Ollama client-selection block. Each example copies this block verbatim — matching how every Python example duplicates the same `load_dotenv` + `API_HOST` switch at the top.
 
 No `.sln`, no `.csproj`, no `Directory.*.props`, no shared library project. This stage is intentionally tiny.
 

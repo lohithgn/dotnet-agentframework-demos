@@ -24,8 +24,6 @@ dotnet run examples/agent_basic.cs
 
 There is **no** `.sln`, **no** `.csproj`, **no** `Directory.Build.props`, and **no** shared library project. NuGet dependencies are declared inline at the top of each `.cs` file using `#:sdk` and `#:package` directives — same model as Python's "one runnable script per example", where every file is self-contained.
 
-The .NET SDK version is pinned in `global.json` (currently `10.0.100`, `rollForward: latestFeature`).
-
 ## Canonical example header
 
 Every example starts with the same preamble. Copy this block verbatim at the top of any new example, then add or remove `#:package` lines based on what the example actually uses (Redis, Postgres, OTel, etc.).
