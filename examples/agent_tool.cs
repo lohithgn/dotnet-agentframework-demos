@@ -29,9 +29,9 @@ IChatClient chatClient = CreateChatClient(apiHost);
 var weatherTool = AIFunctionFactory.Create(
     GetWeather,
     serializerOptions: new JsonSerializerOptions(JsonSerializerDefaults.Web)
-        {
-            TypeInfoResolver = new DefaultJsonTypeInfoResolver()
-        }
+    {
+        TypeInfoResolver = new DefaultJsonTypeInfoResolver()
+    }
 );
 
 AIAgent agent = chatClient.AsAIAgent(

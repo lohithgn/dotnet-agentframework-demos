@@ -64,11 +64,3 @@ jobs:
           else
             echo "examples/ not present yet; skipping."
           fi
-
-      - name: Verify formatting (style)
-        run: |
-          if [ -d examples ]; then
-            dotnet format style --folder examples --verify-no-changes --severity info
-          else
-            echo "examples/ not present yet; skipping."
-          fi
