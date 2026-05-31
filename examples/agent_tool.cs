@@ -27,10 +27,10 @@ string apiHost = Environment.GetEnvironmentVariable("API_HOST") ?? "azure";
 IChatClient chatClient = CreateChatClient(apiHost);
 
 var weatherTool = AIFunctionFactory.Create(
-    GetWeather, 
-    serializerOptions: new JsonSerializerOptions(JsonSerializerDefaults.Web) 
-        { 
-            TypeInfoResolver = new DefaultJsonTypeInfoResolver() 
+    GetWeather,
+    serializerOptions: new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            TypeInfoResolver = new DefaultJsonTypeInfoResolver()
         }
 );
 
