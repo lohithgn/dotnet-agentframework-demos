@@ -327,9 +327,12 @@ sealed class RedisMemoryProvider : AIContextProvider
         }
 
         var filters = new List<string>();
-        if (!string.IsNullOrEmpty(_applicationId)) filters.Add($"@application_id:{{{_applicationId}}}");
-        if (!string.IsNullOrEmpty(_agentId)) filters.Add($"@agent_id:{{{_agentId}}}");
-        if (!string.IsNullOrEmpty(_userId)) filters.Add($"@user_id:{{{_userId}}}");
+        if (!string.IsNullOrEmpty(_applicationId))
+            filters.Add($"@application_id:{{{_applicationId}}}");
+        if (!string.IsNullOrEmpty(_agentId))
+            filters.Add($"@agent_id:{{{_agentId}}}");
+        if (!string.IsNullOrEmpty(_userId))
+            filters.Add($"@user_id:{{{_userId}}}");
 
         var contentMatch = $"@content:({string.Join('|', terms)})";
         var query = filters.Count > 0
