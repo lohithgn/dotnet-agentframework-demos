@@ -34,7 +34,7 @@ AIAgent agent = chatClient.AsAIAgent(
         "You help users plan their weekends and choose the best activities for the given weather. " +
         "If an activity would be unpleasant in weather, don't suggest it. " +
         "Include date of the weekend in response.",
-    name: "weekend-planner",
+    name: "WeekendPlanner",
     tools:
     [
         AIFunctionFactory.Create(GetWeather, serializerOptions: ToolJsonOptions),

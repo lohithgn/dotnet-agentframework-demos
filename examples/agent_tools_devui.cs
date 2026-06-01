@@ -39,14 +39,14 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddChatClient(CreateChatClient(apiHost));
 
 builder.AddAIAgent(
-        "weekend-planner",
+        "WeekendPlanner",
         "You help users plan their weekends and choose the best activities for the given weather. " +
         "If an activity would be unpleasant in weather, don't suggest it. " +
         "Include date of the weekend in response.")
     .WithAITools(
-        AIFunctionFactory.Create(GetWeather, name: "get_weather", serializerOptions: ToolJsonOptions),
-        AIFunctionFactory.Create(GetActivities, name: "get_activities", serializerOptions: ToolJsonOptions),
-        AIFunctionFactory.Create(GetCurrentDate, name: "get_current_date", serializerOptions: ToolJsonOptions));
+        AIFunctionFactory.Create(GetWeather, serializerOptions: ToolJsonOptions),
+        AIFunctionFactory.Create(GetActivities, serializerOptions: ToolJsonOptions),
+        AIFunctionFactory.Create(GetCurrentDate, serializerOptions: ToolJsonOptions));
 
 builder.AddDevUI();
 builder.Services.AddOpenAIResponses();
