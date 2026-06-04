@@ -1,45 +1,3 @@
-// Context isolation with sub-agents.
-//
-// When an agent delegates tool-heavy work to a sub-agent, the sub-agent's
-// context window absorbs all the raw tool output (file contents, search
-// results, etc.). The main agent only sees the sub-agent's concise summary,
-// keeping its own context window small and focused.
-//
-// This is the "context quarantine" pattern described in:
-// - LangChain deep agents: https://docs.langchain.com/oss/python/deepagents/subagents
-// - Manus context engineering: https://rlancemartin.github.io/2025/10/15/manus/
-// - Google ADK architecture: https://cloud.google.com/blog/topics/developers-practitioners/where-to-use-sub-agents-versus-agents-as-tools/
-// - VS Code subagents: https://code.visualstudio.com/docs/copilot/agents/subagents
-//
-//  agent.RunAsync("user question")
-//   │
-//   ▼
-//  ┌─────────────────────────────────────────────────────────┐
-//  │              Coordinator                                │
-//  │  (small context — only sees summaries)                  │
-//  │                                                         │
-//  │  Calls research_codebase("question")                    │
-//  │       │                                                 │
-//  │       ▼                                                 │
-//  │  ┌──────────────────────────────────────────────────┐   │
-//  │  │         Research Sub-Agent                       │   │
-//  │  │  (isolated context — absorbs all raw content)    │   │
-//  │  │                                                  │   │
-//  │  │  1. list_project_files() → file listing          │   │
-//  │  │  2. read_project_file() → full file contents     │   │
-//  │  │  3. search_project_files() → matching lines      │   │
-//  │  │  4. Returns concise summary (< 200 words)        │   │
-//  │  └──────────────────────────────────────────────────┘   │
-//  │       │                                                 │
-//  │       ▼ summary text only                               │
-//  │  Synthesizes final answer from summary                  │
-//  └─────────────────────────────────────────────────────────┘
-//   │
-//   ▼
-//  response (coordinator never saw raw file contents)
-//
-// Compare with agent_without_subagent.cs to see the difference.
-
 #:sdk Microsoft.NET.Sdk
 #:package Microsoft.Agents.AI@1.6.2
 #:package Microsoft.Agents.AI.OpenAI@1.6.2
@@ -48,13 +6,10 @@
 #:package OpenAI@2.10.0
 #:package DotNetEnv@3.2.0
 #:package Spectre.Console@0.55.2
-#:property NoWarn=IL2026;IL3050
 
 using System.ClientModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
-using System.Text.Json;
-using System.Text.Json.Serialization.Metadata;
 using Azure.AI.OpenAI;
 using Azure.Identity;
 using DotNetEnv;
@@ -63,151 +18,99 @@ using Microsoft.Extensions.AI;
 using OpenAI;
 using Spectre.Console;
 
+// Context isolation with sub-agents: the coordinator delegates file research
+// to a sub-agent whose context absorbs the raw file contents. The coordinator
+// only ever sees the sub-agent's concise summary, so its own context stays
+// small. Compare with agent_without_subagent.cs to see the difference.
+
 Env.Load();
 
 string apiHost = Environment.GetEnvironmentVariable("API_HOST") ?? "azure";
 
 IChatClient chatClient = CreateChatClient(apiHost);
 
-JsonSerializerOptions ToolJsonOptions =
-    new(JsonSerializerDefaults.Web) { TypeInfoResolver = new DefaultJsonTypeInfoResolver() };
-
 const string UserQuery =
     "What different patterns are used across this project? " +
     "Read the relevant files to find out.";
 
-// Research sub-agent: owns the file tools. Its context window absorbs the
-// verbose tool output. It is required to return a concise (< 200 word)
-// summary with filenames — the coordinator never sees raw file contents.
+// Research sub-agent: owns the file tools. Its context absorbs the verbose
+// tool output. It returns a concise summary instead of raw file contents.
 AIAgent researchAgent = chatClient.AsAIAgent(
     instructions:
         "You are a code research assistant. Use the available tools to list, " +
         "read, and search C# source files in the project to answer the " +
-        "question. You MUST read several relevant files before summarizing " +
-        "— do not summarize from search snippets alone. Be thorough in your " +
-        "research but return a CONCISE summary of your findings in UNDER 200 " +
-        "WORDS. Cite the filenames you read. Do NOT include raw file " +
+        "question. Be thorough in your research but return a CONCISE summary " +
+        "of your findings in under 200 words. Do NOT include raw file " +
         "contents in your response — summarize the key patterns, classes, " +
         "and functions you found.",
     name: "ResearchAgent",
-    description: "Reads and searches project files and returns a < 200 word summary.",
     tools:
     [
-        AIFunctionFactory.Create(
-            ListProjectFiles,
-            name: "list_project_files",
-            serializerOptions: ToolJsonOptions),
-        AIFunctionFactory.Create(
-            ReadProjectFile,
-            name: "read_project_file",
-            serializerOptions: ToolJsonOptions),
-        AIFunctionFactory.Create(
-            SearchProjectFiles,
-            name: "search_project_files",
-            serializerOptions: ToolJsonOptions),
+        AIFunctionFactory.Create(ListProjectFiles),
+        AIFunctionFactory.Create(ReadProjectFile),
+        AIFunctionFactory.Create(SearchProjectFiles),
     ]);
 
-// We accumulate sub-agent usage here so the report at the end can compare
-// coordinator tokens to sub-agent tokens for the same query.
-List<UsageDetails> subAgentUsageLog = new();
+// Accumulate sub-agent usage so we can compare it to the coordinator's at the end.
+List<UsageDetails> subAgentUsageLog = [];
 
-// Delegation tool. A named local function (not a lambda) closes over
-// `researchAgent` and `subAgentUsageLog`. We deliberately do NOT use
-// `researchAgent.AsAIFunction()` because that helper hides per-call usage,
-// which is the very thing this example exists to compare.
-[Description("Delegate a code research question to the research sub-agent. The sub-agent reads/searches files in its own isolated context and returns a concise summary. The coordinator never sees raw file contents.")]
-async Task<string> ResearchCodebaseAsync(
+// Delegation tool. We deliberately do NOT use researchAgent.AsAIFunction()
+// because that helper hides per-call usage — and the side-by-side token
+// comparison is the whole point of this example. A named local function
+// (rather than a lambda) closes over researchAgent and subAgentUsageLog
+// while staying easy to read.
+[Description("Delegate a code research question to the research sub-agent. The sub-agent reads and searches files in its own isolated context, then returns a concise summary. The coordinator never sees the raw file contents.")]
+async Task<string> ResearchCodebase(
     [Description("A research question about the codebase to investigate.")] string question)
 {
-    AnsiConsole.MarkupLine($"[grey46]  └ Coordinator → ResearchAgent:[/] [wheat4]{Markup.Escape(question)}[/]");
+    AnsiConsole.MarkupLine($"[grey]  └ Coordinator → ResearchAgent: {Markup.Escape(question)}[/]");
     var subResp = await researchAgent.RunAsync(question);
     if (subResp.Usage is not null)
         subAgentUsageLog.Add(subResp.Usage);
     return string.IsNullOrWhiteSpace(subResp.Text) ? "No findings." : subResp.Text;
 }
 
-AIFunction researchCodebaseTool = AIFunctionFactory.Create(
-    ResearchCodebaseAsync,
-    name: "research_codebase",
-    serializerOptions: ToolJsonOptions);
-
-// Coordinator: only has the delegation tool. Its context window stays
-// small and focused — it never sees raw file contents.
+// Coordinator: only has the delegation tool. Its context stays small —
+// it never sees raw file contents, only the sub-agent's summary.
 AIAgent coordinator = chatClient.AsAIAgent(
     instructions:
         "You are a helpful coding assistant. You answer questions about " +
         "codebases, explain patterns, and help developers understand code. " +
-        "Use the research_codebase tool to investigate the codebase before " +
+        "Use the ResearchCodebase tool to investigate the codebase before " +
         "answering — it will read and search files for you. Provide a " +
         "clear, well-organized answer based on the research results.",
     name: "Coordinator",
-    tools: [researchCodebaseTool]);
+    tools: [AIFunctionFactory.Create(ResearchCodebase)]);
 
-AnsiConsole.Write(new Rule("[bold deepskyblue1]Code Research WITH Sub-Agents (Context Isolation)[/]").LeftJustified().RuleStyle("deepskyblue1 dim"));
+AnsiConsole.MarkupLine("\n[bold]=== Code Research WITH Sub-Agents (Context Isolation) ===[/]");
 AnsiConsole.MarkupLine("[dim]The coordinator delegates file reading to a research sub-agent.[/]");
-AnsiConsole.MarkupLine("[dim]Raw file contents stay in the sub-agent's context, not the coordinator's.[/]");
-AnsiConsole.WriteLine();
-AnsiConsole.MarkupLine($"[deepskyblue1]User:[/] {Markup.Escape(UserQuery)}");
-AnsiConsole.WriteLine();
+AnsiConsole.MarkupLine("[dim]Raw file contents stay in the sub-agent's context, not the coordinator's.[/]\n");
 
+AnsiConsole.MarkupLine($"[blue]User:[/] {Markup.Escape(UserQuery)}");
 var response = await coordinator.RunAsync(UserQuery);
+AnsiConsole.MarkupLine($"[green]Coordinator:[/] {Markup.Escape(response.Text)}\n");
 
-AnsiConsole.WriteLine();
-AnsiConsole.Write(new Rule("[bold green]Coordinator[/]").LeftJustified().RuleStyle("green dim"));
-AnsiConsole.MarkupLine($"[green]{Markup.Escape(response.Text)}[/]");
-AnsiConsole.WriteLine();
+long coordIn = response.Usage?.InputTokenCount ?? 0;
+long coordOut = response.Usage?.OutputTokenCount ?? 0;
+long coordTotal = response.Usage?.TotalTokenCount ?? 0;
 
-long? SumNullable(IEnumerable<long?> values)
-{
-    long total = 0;
-    bool anyNonNull = false;
-    foreach (var v in values)
-    {
-        if (v is null) continue;
-        total += v.Value;
-        anyNonNull = true;
-    }
-    return anyNonNull ? total : null;
-}
+long subIn = subAgentUsageLog.Sum(u => u.InputTokenCount ?? 0);
+long subOut = subAgentUsageLog.Sum(u => u.OutputTokenCount ?? 0);
+long subTotal = subAgentUsageLog.Sum(u => u.TotalTokenCount ?? 0);
 
-var usageTable = new Table()
-    .Border(TableBorder.Rounded)
-    .Title("[bold]Token Usage[/]")
-    .AddColumn("Agent")
-    .AddColumn(new TableColumn("Input").RightAligned())
-    .AddColumn(new TableColumn("Output").RightAligned())
-    .AddColumn(new TableColumn("Total").RightAligned());
-
-usageTable.AddRow(
-    "[yellow]Coordinator[/]",
-    FormatTokens(response.Usage?.InputTokenCount),
-    FormatTokens(response.Usage?.OutputTokenCount),
-    FormatTokens(response.Usage?.TotalTokenCount));
-
-usageTable.AddRow(
-    "[yellow]Sub-agent (sum)[/]",
-    FormatTokens(SumNullable(subAgentUsageLog.Select(u => u.InputTokenCount))),
-    FormatTokens(SumNullable(subAgentUsageLog.Select(u => u.OutputTokenCount))),
-    FormatTokens(SumNullable(subAgentUsageLog.Select(u => u.TotalTokenCount))));
-
-AnsiConsole.Write(usageTable);
-AnsiConsole.WriteLine();
+AnsiConsole.MarkupLine("[bold]── Token Usage ──[/]");
+AnsiConsole.MarkupLine($"[yellow]  Coordinator tokens:[/]  input={coordIn:N0}  output={coordOut:N0}  total={coordTotal:N0}");
+AnsiConsole.MarkupLine($"[yellow]  Sub-agent tokens:[/]   input={subIn:N0}  output={subOut:N0}  total={subTotal:N0}\n");
 AnsiConsole.MarkupLine("[dim]The coordinator's input tokens are much lower because it never saw[/]");
 AnsiConsole.MarkupLine("[dim]raw file contents — only the sub-agent's concise summary.[/]");
 AnsiConsole.MarkupLine("[dim]Compare with agent_without_subagent.cs where ALL file contents are in context.[/]");
-
-// ----------------------------------------------------------------------------------
-// File tools (read-only, sandboxed to the examples directory) — given to the
-// research sub-agent only. The coordinator never sees these directly.
-// ----------------------------------------------------------------------------------
 
 [Description("List all files in the given directory under the examples folder.")]
 static string ListProjectFiles(
     [Description("Relative directory path within the examples folder, e.g. '.' or 'spanish'.")] string directory)
 {
-    AnsiConsole.MarkupLine($"[grey46]  └ tool:[/] [wheat4]list_project_files('{Markup.Escape(directory)}')[/]");
-    if (!TryResolveUnderProject(directory, out string? target, out string? error))
-        return error;
+    AnsiConsole.MarkupLine($"[grey]  └ list_project_files('{Markup.Escape(directory)}')[/]");
+    string target = Path.Combine(GetProjectDir(), directory);
     if (!Directory.Exists(target))
         return $"Error: directory '{directory}' not found.";
 
@@ -221,9 +124,8 @@ static string ListProjectFiles(
 static string ReadProjectFile(
     [Description("Relative file path within the examples folder, e.g. 'agent_basic.cs'.")] string filepath)
 {
-    AnsiConsole.MarkupLine($"[grey46]  └ tool:[/] [wheat4]read_project_file('{Markup.Escape(filepath)}')[/]");
-    if (!TryResolveUnderProject(filepath, out string? target, out string? error))
-        return error;
+    AnsiConsole.MarkupLine($"[grey]  └ read_project_file('{Markup.Escape(filepath)}')[/]");
+    string target = Path.Combine(GetProjectDir(), filepath);
     if (!File.Exists(target))
         return $"Error: file '{filepath}' not found.";
 
@@ -234,7 +136,7 @@ static string ReadProjectFile(
 static string SearchProjectFiles(
     [Description("Text to search for (case-insensitive) across all .cs files in the examples folder.")] string query)
 {
-    AnsiConsole.MarkupLine($"[grey46]  └ tool:[/] [wheat4]search_project_files('{Markup.Escape(query)}')[/]");
+    AnsiConsole.MarkupLine($"[grey]  └ search_project_files('{Markup.Escape(query)}')[/]");
     string root = GetProjectDir();
     var results = new List<string>();
     foreach (string path in Directory.EnumerateFiles(root, "*.cs", SearchOption.TopDirectoryOnly).OrderBy(p => p))
@@ -255,39 +157,12 @@ static string SearchProjectFiles(
     return string.Join('\n', results);
 }
 
-// ----------------------------------------------------------------------------------
-// Helpers
-// ----------------------------------------------------------------------------------
-
-// Resolves the project directory using the source file's own location at compile
-// time. File-based apps put the build output in a temp folder, so AppContext
-// .BaseDirectory is the wrong anchor. [CallerFilePath] gives the original path.
+// Equivalent of Python's os.path.dirname(__file__). [CallerFilePath] resolves
+// at compile time to this source file's path, which is what we want — file-based
+// apps put the build output in a temp folder, so AppContext.BaseDirectory and
+// the runtime CWD are both unreliable anchors.
 static string GetProjectDir([CallerFilePath] string sourceFile = "") =>
-    Path.GetFullPath(
-        Environment.GetEnvironmentVariable("PROJECT_DIR")
-        ?? Path.GetDirectoryName(sourceFile)!);
-
-// Tool arguments are model-generated and untrusted: guard against absolute paths
-// (Path.Combine ignores the root if the second arg is rooted) and .. traversal.
-static bool TryResolveUnderProject(string relativePath, out string resolved, out string error)
-{
-    string root = GetProjectDir();
-    string full = Path.GetFullPath(Path.Combine(root, relativePath));
-    string rootWithSep = root.EndsWith(Path.DirectorySeparatorChar) ? root : root + Path.DirectorySeparatorChar;
-    if (!string.Equals(full, root, StringComparison.OrdinalIgnoreCase)
-        && !full.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
-    {
-        resolved = "";
-        error = $"Error: path '{relativePath}' is outside the examples directory.";
-        return false;
-    }
-    resolved = full;
-    error = "";
-    return true;
-}
-
-static string FormatTokens(long? value) =>
-    value is null ? "n/a" : value.Value.ToString("N0");
+    Path.GetDirectoryName(sourceFile)!;
 
 static IChatClient CreateChatClient(string apiHost)
 {
